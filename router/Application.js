@@ -1,27 +1,24 @@
 import http from "http";
-import EventEmitter from "events";
 
 export class Application {
   constructor() {
-    this.emitter = new EventEmitter();
     this.server = this._createServer();
     this.middleWare = [];
+    this.routes = [];
   }
 
-  use(middleWare) {
-    this.middleWare.push(middleWare);
+  use(middleware) {
+    this.middleWare.push(middleware);
   }
 
   addRouter(router) {
     Object.keys(router.endpoints).forEach((path) => {
-      const endpoints = router.endpoint[path];
+      const endpoints = router.endpoints[path];
       Object.keys(endpoints).forEach((method) => {
-        this.emitter.on(_getRouterMask(path, method), (req, res) => {
-          const handler = endpoints[method];
-          this.middleWare.forEach((md) => {
-            md(req, res);
-          });
-          handler(req, res);
+        this.routes.push({
+          path,
+          method,
+          handler: endpoints[method],
         });
       });
     });
@@ -33,18 +30,55 @@ export class Application {
 
   _createServer() {
     return http.createServer((req, res) => {
-      const emit = this.emitter.emit(
-        this._getRouterMask(req.url, req.method),
-        req,
-        res
-      );
-      if (!emit) {
-        res.end();
-      }
+      let body = "";
+
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+
+      req.on("end", () => {
+        if (body) {
+          try {
+            req.body = JSON.parse(body);
+          } catch (e) {
+            req.body = null;
+          }
+        }
+
+        this.middleWare.forEach((md) => md(req, res));
+
+        const route = this._matchRoute(req.pathname, req.method);
+        if (route) {
+          req.params = route.params;
+          route.handler(req, res);
+        } else {
+          res.statusCode = 404;
+          res.end("Not Found");
+        }
+      });
     });
   }
 
-  _getRouterMask(path, method) {
-    return `[${path}]:[${method}]`;
+  _matchRoute(pathname, method) {
+    for (const route of this.routes) {
+      const paramNames = [];
+      const regexPath = route.path.replace(/:([^\/]+)/g, (_, key) => {
+        paramNames.push(key);
+        return "([^\\/]+)";
+      });
+
+      const regex = new RegExp(`^${regexPath}$`);
+      const match = pathname.match(regex);
+
+      if (match && route.method === method) {
+        const params = {};
+        paramNames.forEach((key, index) => {
+          params[key] = match[index + 1];
+        });
+        return { handler: route.handler, params };
+      }
+    }
+
+    return null;
   }
 }
