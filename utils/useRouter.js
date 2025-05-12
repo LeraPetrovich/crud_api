@@ -85,6 +85,11 @@ router.put("/api/users/:userId", (req, res) => {
 router.delete("/api/users/:userId", (req, res) => {
   try {
     const { userId } = req.params;
+    if (userId === "all") {
+      users.length = 0;
+      res.status(204).json({ message: `all users are deleted` });
+      return;
+    }
     const isValidID = validUUID(userId);
     if (!isValidID) {
       return res.status(400).json({ error: "Invalid userId format" });
